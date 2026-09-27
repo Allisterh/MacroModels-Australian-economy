@@ -9,8 +9,8 @@ level. g* spans about 0.2pp, and the models that disagree about it disagree for
 reasons you can name: whether potential is a slow random walk disciplined by
 inflation, or built up from factor trends, or fitted jointly with u*.
 
-FOUR LINES, AND NOT FOUR INDEPENDENT VOTES. Three share the y* core, and the
-fourth shares its key assumption.
+FIVE LINES, AND NOT FIVE INDEPENDENT VOTES. Four share the y* core, and the
+fifth shares its key assumption.
 
 - `ystar`'s inflation and production specs are the same package run two ways,
   sharing the data, the sample, the level equation and the gap definition, and
@@ -21,7 +21,9 @@ fourth shares its key assumption.
   inflation still positions its level and still defines its gap, which is why
   its charts include an inflation-defined output gap.
 - The joint y*/u* model builds on the same y* core and adds Okun and a Phillips
-  curve.
+  curve. Two of its runs are charted: its default, the slack split, which
+  observes underemployment beside unemployment, and the same model on
+  unemployment alone.
 - `rstar_qpm` is a separate package: potential drifts with a trend-growth
   state inside an open-economy system (IS curve, exchange rate, Phillips
   curve, policy rule). But it too treats potential as a slowly drifting random
@@ -30,7 +32,7 @@ fourth shares its key assumption.
 
 **So the agreement here is weaker evidence than it looks.** `cobb_douglas`, the
 one line built a different way, is excluded for COVID artefacts, below. If a
-smoothing assumption common to all four were wrong, nothing here would catch it.
+smoothing assumption common to all five were wrong, nothing here would catch it.
 """
 
 import subprocess
@@ -44,6 +46,7 @@ import pandas as pd
 from src.models.common.staleness import is_current
 from src.models.rstar_qpm.estimate import load_results as load_qpm_results
 from src.models.ystar.results import load_results as load_ystar_results
+from src.models.ystar_ustar import compare as joint_compare
 from src.models.ystar_ustar.results import load_results as load_joint_results
 from src.paths import MODEL_OUTPUTS, ROOT
 
@@ -101,6 +104,11 @@ def _load_joint(prefix: str) -> pd.Series:
     return load_joint_results(prefix=prefix).potential_growth_posterior().median(axis=1)
 
 
+# The joint model's unemployment-only tapered walk, from its --compare, so the
+# flags, prefix and chart directory that reproduce it are defined once, there.
+_JOINT_UNEMPLOYMENT = next(spec for spec in joint_compare.SPECIFICATIONS if spec.prefix == "yus_sum_taper")
+
+
 def _load_qpm(prefix: str) -> pd.Series:
     """Potential growth from `rstar_qpm`: its trend-growth state `g`.
 
@@ -149,11 +157,24 @@ SOURCES: tuple[GstarSource, ...] = (
         script_args=("--spec", "production", "--prefix", "ystar_production"),
     ),
     GstarSource(
-        label="Joint y*/u*",
+        label="Joint y*/u* (slack split)",
         prefix="ystar_ustar",
         script="run-ystar-ustar.sh",
         loader=_load_joint,
-        note="y* and u* estimated together, with Okun and a Phillips curve",
+        note="y* and u* estimated together, with Okun and a Phillips curve on unemployment and "
+             "underemployment; the default run",
+    ),
+    GstarSource(
+        label="Joint y*/u* (unemployment only)",
+        prefix=_JOINT_UNEMPLOYMENT.prefix,
+        script="run-ystar-ustar.sh",
+        loader=_load_joint,
+        note="the same on unemployment alone, u* a tapered random walk",
+        script_args=(
+            *_JOINT_UNEMPLOYMENT.flags,
+            "--prefix", _JOINT_UNEMPLOYMENT.prefix,
+            "--chart-dir", str(_JOINT_UNEMPLOYMENT.chart_dir),
+        ),
     ),
     GstarSource(
         label="Semi-structural open economy",

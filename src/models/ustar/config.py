@@ -62,6 +62,19 @@ GAP_SOURCES = ("defined", "actual")
 #              from the sample start to `taper_end`, then stays there
 USTAR_STRUCTURES = ("decay", "spline", "taper")
 
+# The flat walk (`--flat-walk`): the taper structure started after the 1990s
+# transition, so one flat step size serves throughout. The start is after the
+# move from high unemployment is done; the prior centre is a judgement of u* at
+# that start, tighter than the default because there is no deep slack to place.
+FLAT_WALK_START = "2004Q1"
+FLAT_WALK_INIT_MU = 5.5
+FLAT_WALK_INIT_SD = 1.0
+
+# Where the stepped walk's large step size ends: the end of the charts' shaded
+# early window, so u* is free to make the fast moves the 1990s and 2002-04 ask
+# of it and then settles.
+STEPPED_WALK_END = "2003Q4"
+
 
 @dataclass
 class ModelConfig:
@@ -181,12 +194,14 @@ class ModelConfig:
     # and the fit always prefers a looser walk, so they cannot be estimated.
     #
     # The early sd is loose enough for the 1990s decline to be cheap. The late
-    # sd is tight enough that u* does not echo the cycle: looser settings, or a
-    # later end, let it rise with unemployment in the 2001 slowdown, around
-    # 2008 and after 2020. Ending the taper early is what stops the 2001 rise:
-    # by 2002 it is a plateau, by 2008 a clear hump.
+    # sd is tight enough that u* does not echo the cycle around 2008 or after
+    # 2020, and loose enough to let the path settle where the data put it after
+    # the fast fall in unemployment over 2002-04. It does let u* rise a little
+    # in the 2001 slowdown, which falls inside the shaded early window. Much
+    # looser settings, or a later end, turn that rise into a hump that follows
+    # unemployment. The flat walk takes its one step size from here.
     taper_sigma_early: float = 0.3
-    taper_sigma_late: float = 0.075
+    taper_sigma_late: float = 0.10
     taper_end: str = "2002Q1"
     # Prior on the walk's first quarter. Centred at 8, below the 1993Q1
     # unemployment rate because that quarter was deep slack, and wide, so the
@@ -194,6 +209,11 @@ class ModelConfig:
     # set, overrides the centre.
     taper_init_mu: float = 8.0
     taper_init_sd: float = 5.0
+    # The stepped walk: no taper, the early step size from the start to
+    # `stepped_walk_end`, then the late one. Both step sizes are the taper's,
+    # so the two walks differ only in how the step falls.
+    stepped_walk: bool = False
+    stepped_walk_end: str = STEPPED_WALK_END
 
     # The inflation target, asserted flat across the sample. No phase-in: the
     # sample starts in 1993, inside the inflation-targeting era, so there is
@@ -424,8 +444,19 @@ class ModelConfig:
                 raise ValueError("the taper imposes its own innovation schedule; drop free_sigma_ustar")
             if isinstance(self.start, str) and pd.Period(self.taper_end, freq="Q") <= pd.Period(self.start, freq="Q"):
                 raise ValueError(f"taper_end {self.taper_end} must fall after the sample start {self.start}")
+        self._validate_stepped_walk()
         if self.gap_source not in GAP_SOURCES:
             raise ValueError(f"gap_source must be one of {GAP_SOURCES}, got {self.gap_source!r}")
+
+    def _validate_stepped_walk(self) -> None:
+        """Check the stepped walk belongs to the taper and its large step ends inside the sample."""
+        if not self.stepped_walk:
+            return
+        if self.ustar_structure != "taper":
+            raise ValueError(f"stepped_walk reshapes the taper; ustar_structure is {self.ustar_structure!r}")
+        end = pd.Period(self.stepped_walk_end, freq="Q")
+        if isinstance(self.start, str) and end <= pd.Period(self.start, freq="Q"):
+            raise ValueError(f"the stepped walk's large step ends at {self.stepped_walk_end}, before {self.start}")
 
     @property
     def taper_start_mu(self) -> float:
@@ -451,6 +482,8 @@ class ModelConfig:
             constants["taper_end"] = self.taper_end
             constants["taper_init_mu"] = self.taper_start_mu
             constants["taper_init_sd"] = self.taper_init_sd
+            if self.stepped_walk:
+                constants["stepped_walk_end"] = self.stepped_walk_end
         elif not self.free_sigma_ustar:
             constants["sigma_ustar"] = self.sigma_ustar
         return constants

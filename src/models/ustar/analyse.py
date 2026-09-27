@@ -53,16 +53,15 @@ _BAND_NOTE = "Band x2; see notes. "
 # The window this model's own diagnostics support, applied in `run_analysis`.
 # The joint model sets its own, to the same dates and on its own evidence.
 #
-# Ends 1999Q4, on the level rather than on the band. Across 1993-98 u* averages
-# 8.69 against an unemployment rate of 8.90, so the model reports a gap of
-# -0.22 through six years that opened with unemployment at 10.85: it is saying
-# the labour market was at equilibrium in the deepest slack of the sample. The
-# band criterion is looser and would stop at 1995Q4, the 90% band being 2.79x
-# its mid-sample width in 1993, 1.53x by 1995 and 1.36x by 1996, but a narrow
-# band around a level that tracks unemployment is false precision rather than
-# identification. Independent readings of the same years differ by 2.5 points
-# and close to within 0.5 only by 2000Q2.
-UNIDENTIFIED_WINDOW = ("1993Q1", "1999Q4")
+# Ends 2003Q4, on agreement between sample starts rather than on the band. Two
+# fast falls in unemployment, around 1995 and over 2002-04, arrive with
+# inflation moving the other way from what the level of unemployment implies,
+# so u* would have to move far and fast, which a walk cannot. Where it lands
+# through 2003 depends on where the sample starts: runs from 1993, 2000, 2002
+# and 2004 disagree by up to 0.6 in 2004, and agree to within about 0.1 only
+# from 2010. The 2001 slowdown, when the falling dollar lifted inflation, is
+# read as tightness in every run that includes it.
+UNIDENTIFIED_WINDOW = ("1993Q1", "2003Q4")
 
 # Orange rather than the excluded window's yellow, so the two are told apart at
 # a glance where both appear. Low alpha: it sits under the u* line, which is
@@ -117,18 +116,20 @@ def _excluded_span(window: Window | None) -> list[dict[str, Any]]:
 
 
 def _with_excluded(
-    kwargs: dict[str, Any], results: UStarResults, *, unidentified: bool = True,
+    kwargs: dict[str, Any], results: UStarResults, *, unidentified: bool = True, excluded: bool = True,
 ) -> dict[str, Any]:
     """Add the run's unfitted-window and weakly-identified markers to finalise kwargs.
 
-    `unidentified` is off for the inflation-shaded chart, where a third block
-    of colour over the first seven years sits on top of the red and blue
-    band-breach shading and makes both unreadable. The window is still marked
-    on the plain u* chart beside it.
+    Both are off for the inflation-shaded chart, where further blocks of colour
+    sit on top of the red and blue band-breach shading and make it hard to read.
+    Both windows are still marked on the plain u* chart beside it.
     """
     unidentified_window = chart_annotations.window(results, chart_annotations.UNIDENTIFIED_WINDOW)
     excluded_window = chart_annotations.window(results, chart_annotations.EXCLUDED_WINDOW)
-    spans = (unidentified_span(unidentified_window) if unidentified else []) + _excluded_span(excluded_window)
+    spans = (
+        (unidentified_span(unidentified_window) if unidentified else [])
+        + (_excluded_span(excluded_window) if excluded else [])
+    )
     if not spans:
         return kwargs
     existing = kwargs.get("axvspan") or []
@@ -320,11 +321,12 @@ def plot_ustar(results: UStarResults, shade_inflation: bool = False, tag: str = 
     about where the shading and the gap coincide.
     """
     ustar = results.ustar_posterior()
+    slack = chart_annotations.text(results, chart_annotations.SLACK, chart_annotations.DEFAULT_SLACK)
 
     ax = mg.fill_between_plot(_band(ustar), **_BAND_KWARGS)
     mg.line_plot(
         pd.DataFrame({
-            "Unemployment rate": results.unemployment(),
+            f"{slack} rate": results.unemployment(),
             "u*": ustar.median(axis=1),
         }),
         ax=ax,
@@ -335,10 +337,10 @@ def plot_ustar(results: UStarResults, shade_inflation: bool = False, tag: str = 
         rounding=2,
     )
     finalise_kwargs: dict[str, Any] = {
-        "title": "u* and the unemployment rate",
+        "title": f"u* and the {slack.lower()} rate",
         "ylabel": "Per cent",
         "legend": {"loc": "best", "fontsize": "small"},
-        "lheader": "u* is the unemployment rate consistent with output at potential",
+        "lheader": f"u* is the {slack.lower()} rate consistent with output at potential",
         "rfooter": _rfooter(results),
         "lfooter": _lfooter_band(results),
         "show": False,
@@ -351,12 +353,15 @@ def plot_ustar(results: UStarResults, shade_inflation: bool = False, tag: str = 
             f"Shaded where quarterly annualised trimmed mean inflation sat outside "
             f"{_INFLATION_LOW:g}-{_INFLATION_HIGH:g}%: red above, blue below"
         )
-    mg.finalise_plot(ax, **_with_excluded(finalise_kwargs, results, unidentified=not shade_inflation))
+    mg.finalise_plot(
+        ax, **_with_excluded(finalise_kwargs, results, unidentified=not shade_inflation, excluded=not shade_inflation),
+    )
 
 
 def plot_ugap(results: UStarResults) -> None:
     """Plot the unemployment gap, u - u*, with a credible band."""
     ugap = results.ugap_posterior()
+    slack = chart_annotations.text(results, chart_annotations.SLACK, chart_annotations.DEFAULT_SLACK)
 
     ax = mg.fill_between_plot(_band(ugap), **_BAND_KWARGS)
     mg.line_plot(
@@ -368,7 +373,7 @@ def plot_ugap(results: UStarResults) -> None:
         rounding=2,
     )
     mg.finalise_plot(ax, **_with_excluded({
-        "title": "Unemployment gap",
+        "title": f"{slack} gap",
         "ylabel": "Percentage points",
         "y0": True,
         "legend": {"loc": "best", "fontsize": "small"},

@@ -21,7 +21,7 @@ from src.models.ustar.results import UStarResults
 from src.models.ystar import analyse as ystar_analyse
 from src.models.ystar.decompose import decompose_potential_growth, print_decomposition
 from src.models.ystar.results import PotentialResults
-from src.models.ystar_ustar.config import CHART_DIR
+from src.models.ystar_ustar.config import CHART_DIR, DEFAULT_PREFIX
 from src.models.ystar_ustar.results import JointResults, load_results
 
 # Reference values from the separately estimated parents, for the comparison
@@ -45,14 +45,12 @@ def _lfooter(results: JointResults, extra: str = "") -> str:
 # The quarters where u* is not well identified: the sample opens one quarter
 # after a five-point collapse in inflation expectations, and neither the
 # inflation-defined gap nor a phased anchor can place a level there. Ends
-# 1999Q4, on the level rather than on the band: across 1993-98 u* averages 8.71
-# against an unemployment rate of 8.90, a reported gap of -0.19 through six
-# years that opened at 10.85, which is the model calling the deepest slack in
-# the sample equilibrium. The band criterion is looser and would stop at
-# 1995Q4, the 90% band being 2.61x its mid-sample width in 1993 and 1.45x by
-# 1995, but a narrow band around a level that tracks unemployment is false
-# precision rather than identification. See MODEL_NOTES, "The early sample".
-UNIDENTIFIED_WINDOW = ("1993Q1", "1999Q4")
+# 2003Q4, not at the end of the 1990s: unemployment fell fast again over
+# 2002-04 while inflation eased, which asks u* to fall further and faster than
+# the walk allows, so its level through 2003 depends on the structure imposed
+# and the sample start more than on the data. The structures tested here
+# disagree most over exactly these years. See MODEL_NOTES, "The early sample".
+UNIDENTIFIED_WINDOW = ("1993Q1", "2003Q4")
 
 # Used only for runs saved before `build_observations` began recording where its
 # series came from. A current run carries its own records and `_rfooter` reads
@@ -354,11 +352,11 @@ def _chart_phillips_curve(results: JointResults) -> None:
     mg.finalise_plot(
         ax,
         title="The Phillips curve as specified",
-        xlabel="Unemployment gap, (u - u*) / u",
+        xlabel=f"{_slack_noun(results)} gap, (u - u*) / u",
         ylabel="Quarterly inflation less anchor,\nexpectations and supply terms",
         legend={"loc": "best", "fontsize": "small"},
         lheader=f"gamma = {gamma_median:.2f}, 90% interval [{lo_g:.2f}, {hi_g:.2f}]",
-        lfooter=_lfooter(results, "Excluded quarters dropped. Axes not independent: see notes. "),
+        lfooter=_lfooter(results, "Axes not independent: see notes. "),
         rfooter=_rfooter(results),
         show=False,
     )
@@ -552,7 +550,17 @@ def _annotate_views(results: JointResults, ystar_view: PotentialResults, ustar_v
         # 1993, the Phillips residuals are systematically negative until 1999, and
         # expectations do not reach the target until 1998. See MODEL_NOTES.
         unidentified_window=UNIDENTIFIED_WINDOW,
+        slack=_slack_noun(results),
     )
+
+
+def _slack_noun(results: JointResults) -> str:
+    """Name the run's slack measure for chart labels: "Unemployment" or "Underutilisation"."""
+    slack = results.constants.get("slack")
+    # Under "both", u is still the unemployment rate; underemployment has its own chart.
+    if not isinstance(slack, str) or slack == "both":
+        return chart_annotations.DEFAULT_SLACK
+    return slack.capitalize()
 
 
 def _draw_charts(
@@ -612,18 +620,66 @@ def _draw_charts(
     _chart_implied_ustar(results)
     _chart_phillips_curve(results)
     _chart_parameter_posteriors(results)
+    if "sstar" in results.posterior:
+        _chart_slack_split(results)
+
+
+def _posterior_median(results: JointResults, name: str) -> pd.Series:
+    """Return a state's posterior median over the sample quarters."""
+    draws = np.asarray(results.posterior[name].values)
+    return pd.Series(np.median(draws.reshape(-1, draws.shape[-1]), axis=0), index=results.obs_index)
+
+
+def _chart_slack_split(results: JointResults) -> None:
+    """Chart total structural slack and its split, under slack "both".
+
+    A flat s* with a falling share is slack moving from unemployment into
+    underemployment; a falling s* is a fall in slack itself.
+    """
+    stars = pd.DataFrame({
+        "s* (total)": _posterior_median(results, "sstar"),
+        "u* (unemployment)": _posterior_median(results, "ustar"),
+        "ue* (underemployment)": _posterior_median(results, "uestar"),
+        "Underemployment rate": pd.Series(results.obs["ue"], index=results.obs_index),
+    })
+    mg.line_plot_finalise(
+        stars,
+        title="Structural slack and its split",
+        ylabel="Per cent of the labour force",
+        width=[2, 2, 2, 1],
+        style=["-", "-", "-", ":"],
+        annotate=True,
+        rounding=2,
+        legend={"loc": "best", "fontsize": "small"},
+        lfooter=_lfooter(results, "Medians. "),
+        rfooter=_rfooter(results),
+        axvspan=_excluded_span(results),
+        show=False,
+    )
+    mg.line_plot_finalise(
+        _posterior_median(results, "ushare").mul(100).rename("Unemployment's share of s*"),
+        title="Unemployment's share of structural slack",
+        ylabel="Per cent",
+        annotate=True,
+        rounding=1,
+        lfooter=_lfooter(results, "Median. "),
+        rfooter=_rfooter(results),
+        axvspan=_excluded_span(results),
+        show=False,
+    )
 
 
 def run_analysis(
-    prefix: str = "ystar_ustar",
+    prefix: str = DEFAULT_PREFIX,
     sigma_v_prior: float = 1.0,
     chart_dir: Path | str | None = None,
 ) -> JointResults:
     """Load a saved run, print the diagnostics, write every chart.
 
-    `chart_dir` defaults to `charts/YStarUStar`. Pass a different one for a
-    variant run: the charting clears its directory first, so analysing a
-    variant into the default would delete the headline run's charts.
+    `chart_dir` defaults to `charts/YStarUStar` for the default prefix and to
+    `charts/YStarUStar-<prefix>` for any other. The charting clears its
+    directory first, so a variant charted into the default would delete the
+    headline run's charts.
     """
     results = load_results(prefix=prefix)
     print_diagnostics(results, sigma_v_prior=sigma_v_prior)
@@ -631,7 +687,9 @@ def run_analysis(
     ystar_view = _as_ystar_results(results)
     ustar_view = _as_ustar_results(results)
 
-    chart_dir = Path(chart_dir) if chart_dir is not None else CHART_DIR
+    if chart_dir is None:
+        chart_dir = CHART_DIR if prefix == DEFAULT_PREFIX else CHART_DIR.with_name(f"{CHART_DIR.name}-{prefix}")
+    chart_dir = Path(chart_dir)
     mg.set_chart_dir(str(chart_dir))
     mg.clear_chart_dir()
     save_diagnostics(results.trace, chart_dir, prefix, model="ystar_ustar")

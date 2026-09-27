@@ -94,7 +94,9 @@ def get_gscpi_qrtly_live(verbose: bool = False) -> DataSeries:
 
     """
     monthly = get_gscpi_monthly_live(verbose=verbose)
-    quarterly = ra.monthly_to_qtly(monthly.data, q_ending="DEC", f="mean")
+    # readabs wants a monthly PeriodIndex; the monthly loader keeps month-end timestamps.
+    monthly_periods = monthly.data.set_axis(pd.PeriodIndex(monthly.data.index, freq="M"))
+    quarterly = ra.monthly_to_qtly(monthly_periods, q_ending="DEC", f="mean")
     quarterly.index = pd.PeriodIndex(quarterly.index, freq="Q")
 
     return DataSeries(

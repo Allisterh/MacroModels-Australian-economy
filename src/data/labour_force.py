@@ -2,8 +2,11 @@
 
 Provides unemployment rate, labour force, and hours worked from ABS data.
 Uses Modellers Database (1364.0.15.003) for total population coverage
-including defence/non-civilian employment.
+including defence/non-civilian employment. Underemployment and underutilisation
+come from the Labour Force Survey (6202.0), which is civilian only.
 """
+
+from functools import cache
 
 import numpy as np
 import readabs as ra
@@ -436,4 +439,60 @@ def get_hours_growth_qrtly_lfs() -> DataSeries:
         description="Hours worked growth (quarterly log diff, monthly LFS source)",
         cat=hours_q.cat,
         table=hours_q.table,
+    )
+
+
+# Underemployment and underutilisation are in the Labour Force Survey's table of
+# underutilised persons. Selected by exact description, since the same text with an
+# age range appended names each age breakdown in the same table.
+_UNDERUTILISED_CAT = "6202.0"
+_UNDERUTILISED_TABLE = "62020X29"
+
+
+@cache
+def _underutilised_qrtly(did: str, description: str) -> DataSeries:
+    """Return one persons, seasonally adjusted rate from the underutilised table, as a quarterly mean."""
+    found, _meta = ra.read_abs_by_desc(
+        {did: {
+            "did": did,
+            "cat": _UNDERUTILISED_CAT,
+            "table": _UNDERUTILISED_TABLE,
+            "single_excel_only": _UNDERUTILISED_TABLE,
+            "stype": "Seasonally Adjusted",
+            "exact_match": True,
+        }},
+        verbose=False,
+    )
+    quarterly = ra.monthly_to_qtly(found[did], q_ending="DEC", f="mean")
+
+    return DataSeries(
+        data=quarterly,
+        source="ABS",
+        units="%",
+        description=description,
+        cat=_UNDERUTILISED_CAT,
+        table=_UNDERUTILISED_TABLE,
+    )
+
+
+def get_underutilisation_rate_qrtly() -> DataSeries:
+    """Get the underutilisation rate, unemployed plus underemployed as a share of the labour force (quarterly).
+
+    Returns:
+        DataSeries with the quarterly mean underutilisation rate (%)
+
+    """
+    return _underutilised_qrtly("Underutilisation rate ;  Persons ;", "Underutilisation rate (quarterly average)")
+
+
+def get_underemployment_rate_qrtly() -> DataSeries:
+    """Get the underemployment rate as a share of the labour force (quarterly).
+
+    Returns:
+        DataSeries with the quarterly mean underemployment rate (%)
+
+    """
+    return _underutilised_qrtly(
+        "Underemployment rate (proportion of labour force) ;  Persons ;",
+        "Underemployment rate (quarterly average)",
     )

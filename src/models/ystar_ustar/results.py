@@ -7,6 +7,7 @@ from pathlib import Path
 import arviz as az
 import numpy as np
 import pandas as pd
+import xarray as xr
 
 from src.models.common.results import PosteriorResults
 from src.models.ystar_ustar.config import DEFAULT_OUTPUT_DIR
@@ -202,7 +203,7 @@ class JointResults(PosteriorResults):
         else:
             demand = float(median["gamma_pi"]) * pd.Series(
                 np.asarray(median["ugap"].values), index=index,
-            )
+            ) + self._underemployment_demand(median)
         gscpi = pd.Series(self.obs["gscpi"], index=index)
         supply = (
             float(median["rho_pi"]) * pd.Series(self.obs["d4pm"], index=index)
@@ -224,8 +225,9 @@ class JointResults(PosteriorResults):
         """Return the Phillips curve reduced to its two axes, as specified.
 
         `demand_slack` is the equation's own regressor, `(u - u*)/u`.
-        `inflation_ex_other` is quarterly inflation with every non-demand term
-        removed: the anchor, the expectations excess, import prices and GSCPI.
+        `inflation_ex_other` is quarterly inflation with every other term
+        removed: the anchor, the expectations excess, import prices, GSCPI and,
+        when the run observed underemployment, its gap term.
 
         By construction the equation says `inflation_ex_other = gamma_pi x
         demand_slack + e_p`, so a scatter of the two is the fitted relationship
@@ -259,8 +261,20 @@ class JointResults(PosteriorResults):
                 - float(median["beta_pi"]) * (quarterly(pi_exp) - anchor_q)
                 - float(median["rho_pi"]) * d4pm
                 - float(median["xi_gscpi"]) * gscpi**2 * np.sign(gscpi)
+                - self._underemployment_demand(median)
             ),
         })
+
+    def _underemployment_demand(self, median: xr.Dataset) -> pd.Series:
+        """Return the Phillips curve's underemployment term, `gamma_ue x (ue - ue*)/ue`.
+
+        Zero unless the run observed underemployment (slack "both"), where the
+        demand term has two parts and anything reduced to the unemployment gap's
+        axis must remove this one.
+        """
+        if "gamma_ue" not in median:
+            return pd.Series(0.0, index=self.obs_index)
+        return float(median["gamma_ue"]) * pd.Series(np.asarray(median["uegap"].values), index=self.obs_index)
 
     def implied_ustar(self) -> pd.Series:
         """Return the u* each quarter's inflation would need, taken on its own.

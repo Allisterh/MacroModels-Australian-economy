@@ -12,24 +12,38 @@ Non-centred: the innovations are standard normals scaled by the schedule, so
 the sampler sees the same geometry whatever the step size.
 """
 
+from collections.abc import Sequence
+
 import numpy as np
 import pandas as pd
 import pymc as pm
 import pytensor.tensor as pt
 
 
-def taper_schedule(obs_index: pd.PeriodIndex, early: float, late: float, end: str) -> np.ndarray:
+def taper_schedule(
+    obs_index: pd.PeriodIndex,
+    early: float,
+    late: float,
+    end: str,
+    windows: Sequence[tuple[str, str, float]] = (),
+) -> np.ndarray:
     """Return the innovation sd for each quarter of `obs_index`.
 
     Linear in quarters from `early` at the first quarter to `late` at `end`,
-    flat at `late` after it.
+    flat at `late` after it. Each of `windows`, (first quarter, last quarter,
+    sd), raises the sd to at least that value inside it, for a move the
+    schedule would otherwise make expensive; a window never tightens it.
     """
     span = float((pd.Period(end, freq="Q") - obs_index[0]).n)
     if span <= 0:
         raise ValueError(f"the taper must end after the sample start {obs_index[0]}, not at {end}")
     steps = np.arange(len(obs_index), dtype=float)
     weight = np.clip(1.0 - steps / span, 0.0, 1.0)
-    return late + (early - late) * weight
+    sigma = late + (early - late) * weight
+    for first, last, window_sigma in windows:
+        inside = (obs_index >= pd.Period(first, freq="Q")) & (obs_index <= pd.Period(last, freq="Q"))
+        sigma = np.where(inside, np.maximum(sigma, window_sigma), sigma)
+    return sigma
 
 
 def tapered_walk(
@@ -42,13 +56,14 @@ def tapered_walk(
     end: str,
     init_mu: float,
     init_sd: float,
+    windows: Sequence[tuple[str, str, float]] = (),
 ) -> pt.TensorVariable:
     """Add the tapered walk to `model` as the deterministic `name`, and return it.
 
     The first quarter carries a Normal(`init_mu`, `init_sd`) prior; each later
-    quarter adds one scaled innovation.
+    quarter adds one scaled innovation. `windows` is as for `taper_schedule`.
     """
-    sigma = taper_schedule(obs_index, early, late, end)
+    sigma = taper_schedule(obs_index, early, late, end, windows)
     with model:
         init = pm.Normal(f"{name}_init", mu=init_mu, sigma=init_sd)
         z = pm.Normal(f"z_{name}", mu=0.0, sigma=1.0, shape=len(obs_index) - 1)

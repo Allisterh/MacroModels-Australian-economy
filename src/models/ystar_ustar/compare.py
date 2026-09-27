@@ -1,9 +1,10 @@
 """The comparison specifications behind `--compare`, and how to refresh them.
 
-Nine settings of this model: a full crossing of the structure imposed on u*
-(decay, or a spline with 1, 2 or 3 knots) with the definition of the output
-gap (inflation-defined, or y - y*), plus the tapered random walk on the
-inflation-defined gap. MODEL_NOTES, "Comparing specifications",
+Eleven settings of this model: the default run, the slack split, which observes
+underemployment beside unemployment; then, observing unemployment alone, a full
+crossing of the structure imposed on u* (decay, or a spline with 1, 2 or 3
+knots) with the definition of the output gap (inflation-defined, or y - y*),
+plus the tapered and stepped random walks on the inflation-defined gap. MODEL_NOTES, "Comparing specifications",
 explains the crossing, the Okun bound the identity gap needs, and how to read
 the comparison.
 
@@ -93,27 +94,33 @@ _K1 = ["--ustar-structure", "spline", "--knots", "2013Q1"]
 _K2 = ["--ustar-structure", "spline", "--knots", "1996Q1", "2013Q1"]
 _K3 = ["--ustar-structure", "spline", "--knots", "1996Q1", "2008Q1", "2013Q1"]
 _DECAY = ["--ustar-structure", "decay"]
-_TAPER = ["--ustar-structure", "taper"]
+# Every specification but the default observes unemployment alone. The slack
+# split is the default run; the rest vary the u* structure or the gap on the
+# single-series model, whose walk settings follow from the slack measure.
+_UNEMPLOYMENT = ["--slack", "unemployment"]
 
 SPECIFICATIONS: list[Specification] = [
+    Specification("Slack split u*, inflation-defined gap", "ystar_ustar", [], "teal", "-", default=True),
     Specification("Decay u*, inflation-defined gap", "yus_sum_decay",
-                  [*_DECAY, *_DEFINED], "tab:blue", "-"),
-    Specification("Spline u*, 1 knot, inflation-defined gap", "ystar_ustar", [], "darkorange", "-",
-                  default=True),
+                  [*_UNEMPLOYMENT, *_DECAY, *_DEFINED], "tab:blue", "-"),
+    Specification("Spline u*, 1 knot, inflation-defined gap", "yus_sum_k1",
+                  [*_UNEMPLOYMENT, *_K1, *_DEFINED], "darkorange", "-"),
     Specification("Spline u*, 2 knots, inflation-defined gap", "yus_sum_k2",
-                  [*_K2, *_DEFINED], "seagreen", "-"),
+                  [*_UNEMPLOYMENT, *_K2, *_DEFINED], "seagreen", "-"),
     Specification("Spline u*, 3 knots, inflation-defined gap", "yus_sum_k3",
-                  [*_K3, *_DEFINED], "rebeccapurple", "-"),
-    Specification("Random walk u*, inflation-defined gap", "yus_sum_taper",
-                  [*_TAPER, *_DEFINED], "brown", "-"),
+                  [*_UNEMPLOYMENT, *_K3, *_DEFINED], "rebeccapurple", "-"),
+    Specification("Tapered walk u*, inflation-defined gap", "yus_sum_taper",
+                  [*_UNEMPLOYMENT, *_DEFINED], "brown", "-"),
+    Specification("Stepped walk u*, inflation-defined gap", "yus_sum_stepped",
+                  [*_UNEMPLOYMENT, "--stepped-walk", *_DEFINED], "darkblue", "-"),
     Specification("Decay u*, gap = y - y*", "yus_sum_decay_id",
-                  [*_DECAY, *_IDENTITY], "tab:blue", "--"),
+                  [*_UNEMPLOYMENT, *_DECAY, *_IDENTITY], "tab:blue", "--"),
     Specification("Spline u*, 1 knot, gap = y - y*", "yus_sum_k1_id",
-                  [*_K1, *_IDENTITY], "darkorange", "--"),
+                  [*_UNEMPLOYMENT, *_K1, *_IDENTITY], "darkorange", "--"),
     Specification("Spline u*, 2 knots, gap = y - y*", "yus_sum_k2_id",
-                  [*_K2, *_IDENTITY], "seagreen", "--"),
+                  [*_UNEMPLOYMENT, *_K2, *_IDENTITY], "seagreen", "--"),
     Specification("Spline u*, 3 knots, gap = y - y*", "yus_sum_k3_id",
-                  [*_K3, *_IDENTITY], "rebeccapurple", "--"),
+                  [*_UNEMPLOYMENT, *_K3, *_IDENTITY], "rebeccapurple", "--"),
 ]
 
 

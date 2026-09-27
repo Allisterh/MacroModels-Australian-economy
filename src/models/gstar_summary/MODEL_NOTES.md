@@ -16,16 +16,17 @@ Latest quarter, 2026Q2:
 
 | source | g* | what it is built from |
 |---|---|---|
-| Semi-structural open economy (`rstar_qpm`) | **2.12** | y* a drifting random walk inside an IS / exchange-rate / Phillips / rule system; its trend-growth state g |
-| Joint y*/u* | **1.95** | y* and u* estimated together, with Okun and a Phillips curve |
+| Semi-structural open economy (`rstar_qpm`) | **2.09** | y* a drifting random walk inside an IS / exchange-rate / Phillips / rule system; its trend-growth state g |
+| Joint y*/u* (unemployment only) | **2.01** | y* and u* estimated together, with Okun and a Phillips curve on unemployment |
+| Joint y*/u* (slack split) | **1.95** | the same, observing underemployment beside unemployment; the default run |
 | y* (inflation spec) | **1.94** | potential is a slow random walk; the gap is defined by inflation |
 | y* (production spec) | **1.90** | growth from capital, hours and MFP trends; level and gap still inflation-defined |
 
-**A spread of 0.22pp, against about 1.0pp for r\*.** That contrast is the reason this package
+**A spread of 0.19pp, against about 1.0pp for r\*.** That contrast is the reason this package
 exists as a sibling to [`rstar_summary`](../rstar_summary/MODEL_NOTES.md) rather than a section
 inside it. The two answer the same kind of question, "what does this repo actually know", and
 get opposite answers. For r* no model identifies a level and the honest band is the
-cross-model spread. For g* four estimates land within about a sixth of a percentage point,
+cross-model spread. For g* the estimates land within about a fifth of a percentage point,
 though see the caveat below about how much of that is independence.
 
 The mean across models ends at **1.98**, which is close to the RBA's ~2.0 and well below
@@ -33,9 +34,9 @@ Treasury's 2.5. It is a description of where the models sit, not an estimate: an
 across structural assumptions is a value no model produces, the same objection `rstar_hlw`'s
 notes make to its own blended median.
 
-## Four lines, and not four independent votes
+## Five lines, and not five independent votes
 
-**Three share the y\* state-space core, and the fourth shares its key assumption**, so the
+**Four share the y\* state-space core, and the fifth shares its key assumption**, so the
 agreement is weaker evidence than it looks.
 
 - `ystar`'s **inflation** and **production** specs are one package run two ways. They share the
@@ -45,6 +46,9 @@ agreement is weaker evidence than it looks.
   estimate**: its growth comes from factor trends, but inflation still positions its level and
   defines its gap, which is why its chart directory contains an inflation-defined output gap.
 - The **joint y*/u\*** model is built on the same y* core and adds Okun and a Phillips curve.
+  Two of its runs are charted: the default slack split, which observes underemployment beside
+  unemployment, and the same model on unemployment alone. They differ only in the labour
+  market, so their agreement on g* is close to arithmetic.
 - **`rstar_qpm`** is a separate package, potential drifting with a trend-growth state inside an
   open-economy system. Its line is that trend-growth state, potential growth without the
   level shocks to potential, which would otherwise read as swings in growth. But it too
@@ -53,7 +57,7 @@ agreement is weaker evidence than it looks.
   independent one. It sits a little above the rest in recent years.
 
 `cobb_douglas`, the one line built a different way, is excluded for COVID artefacts, below.
-**If a smoothing assumption common to all four were wrong, nothing on this chart would catch
+**If a smoothing assumption common to all five were wrong, nothing on this chart would catch
 it**, and that is the honest limitation of the agreement above.
 
 ## Why `cobb_douglas` is not here: COVID artefacts

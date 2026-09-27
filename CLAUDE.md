@@ -46,10 +46,10 @@ uv run python -m src.models.rstar_hlw_kalman.run   # canonical HLW by Kalman fil
                                    #   back as the real cash rate (see MODEL_NOTES)
 ./run-rstar-summary.sh             # every r* model on one nominal scale; re-runs any whose
                                    #   saved trace is not from today, which regenerates THEIR charts
-./run-ustar.sh --compare           # three specifications of the u* model on one chart
+./run-ustar.sh --compare           # four specifications of the u* model on one chart
 ./run-gstar-summary.sh             # every g* (potential growth) estimate on one chart; re-runs
                                    #   any whose saved trace is not from today (--no-refresh skips)
-./run-ustar-summary.sh             # four u* specifications (three ustar, one ystar_ustar) on one
+./run-ustar-summary.sh             # four u* specifications (two ustar, two ystar_ustar) on one
                                    #   chart; re-runs stale ones (--no-refresh skips)
 ./run-bank-costs.sh                # Bank funding and lending costs vs the cash rate (charts only)
 uv run python -m src.models.is_curve.run   # IS-curve scatter (retired: the search found no IS curve)
@@ -60,10 +60,10 @@ uv run python -m src.models.common.diagnostics_report  # MCMC diagnostics for EV
                                    #   writes run-diagnostics-<prefix>.txt into that run's chart
                                    #   directory, beside the charts it describes (one file per
                                    #   trace: expectations writes three).
-./run-ystar-ustar.sh               # Run joint y*/u* model (gap partly free, u* a spline;
+./run-ystar-ustar.sh               # Run joint y*/u* model (gap partly free, slack split: u and underemployment;
                                    #   needs expectations)
 ./run-ystar.sh --compare           # five specifications of the y* model on one chart
-./run-ystar-ustar.sh --compare     # nine specifications (u* structure x gap definition, plus taper)
+./run-ystar-ustar.sh --compare     # eleven specifications (slack split default; u* structure x gap on unemployment alone)
 uv run python -m src.models.dsge.fa_nk_model         # Run financial-accelerator DSGE (two r* + EFP wedge)
 uv run python -m src.models.dsge.fa_nk_wage_model    # Run FA-NK + sticky wages + Galí unemployment
 uv run python -m src.models.dsge.nk_twostar_model    # Run NK two-star linear probe
@@ -101,7 +101,7 @@ src/
 │   │   # LIVE
 │   ├── expectations/              # Inflation expectations (unanchored, short, market)
 │   ├── ystar/                     # Potential output; preferred source for POTENTIAL GROWTH; --compare
-│   ├── ustar/                     # u* from one Phillips curve, random walk; don't quote before 2000; --compare
+│   ├── ustar/                     # u* from one Phillips curve, random walk; don't quote before 2004; --compare
 │   ├── ystar_ustar/               # Joint y*/u*: PREFERRED for the output gap and u*; --compare
 │   ├── cobb_douglas/              # Growth accounting only; not COVID-robust, don't quote post-2019 g*
 │   ├── gstar_summary/             # NOT A MODEL: potential growth estimates on one chart

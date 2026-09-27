@@ -11,15 +11,26 @@ from src.models.ystar.base import SamplerConfig
 from src.models.ystar_ustar.analyse import run_analysis
 from src.models.ystar_ustar.config import (
     ANCHOR_PHASES,
+    CHART_DIR,
     DEFAULT_EXCLUDE_WINDOW,
+    DEFAULT_PREFIX,
     EXCLUDE_SCOPES,
     GAP_PI_BASES,
     GAP_SPECS,
     OKUN_FORMS,
+    SLACK_MEASURES,
+    STEPPED_WALK_END,
     USTAR_STRUCTURES,
+    WALK_SCALES,
     ModelConfig,
 )
 from src.models.ystar_ustar.estimate import run_estimate
+
+
+def _scale_help(setting: str) -> str:
+    """Quote one walk setting's default for each slack measure, from WALK_SCALES."""
+    defaults = ", ".join(f"{slack} {getattr(scale, setting):g}" for slack, scale in WALK_SCALES.items())
+    return f"(default by --slack: {defaults})"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,6 +54,17 @@ def build_parser() -> argparse.ArgumentParser:
              "'cycle' (a free AR(1) latent that inflation observes). See "
              "ModelConfig.gap_spec",
     )
+    parser.add_argument(
+        "--slack", default=ModelConfig.slack, choices=list(SLACK_MEASURES),
+        help=f"The slack measure Okun and the Phillips curve read (default {ModelConfig.slack}); "
+             "underutilisation adds the underemployed, so set the u* priors and steps to its scale",
+    )
+    parser.add_argument("--share-sigma-early", type=float, default=ModelConfig.share_sigma_early,
+                        help=f"Slack split: step of unemployment's share (logit) at the start "
+                             f"(default {ModelConfig.share_sigma_early:g})")
+    parser.add_argument("--share-sigma-late", type=float, default=ModelConfig.share_sigma_late,
+                        help=f"Slack split: step of unemployment's share (logit) from --taper-end on "
+                             f"(default {ModelConfig.share_sigma_late:g})")
     parser.add_argument(
         "--gap-pi-basis", default="quarterly", choices=list(GAP_PI_BASES),
         help="Which trimmed mean horizon defines the gap (default: quarterly). "
@@ -106,6 +128,10 @@ def build_parser() -> argparse.ArgumentParser:
              "test whether the textbook-Okun prior mean is pulling the slope",
     )
     parser.add_argument(
+        "--beta-prior-mu", type=float, default=ModelConfig.beta_okun_prior_mu,
+        help=f"Prior mean for beta_okun (default {ModelConfig.beta_okun_prior_mu:g}); scale it with the slack measure",
+    )
+    parser.add_argument(
         "--sigma-okun", type=float, default=0.20,
         help="Imposed Okun residual sd (default 0.20). See ModelConfig.sigma_okun",
     )
@@ -115,23 +141,27 @@ def build_parser() -> argparse.ArgumentParser:
              "potential plus a level pull toward u*. See ModelConfig.okun_form",
     )
     parser.add_argument(
-        "--ustar-structure", dest="ustar_structure", default="spline", choices=USTAR_STRUCTURES,
-        help="The law u* follows (default spline). See ModelConfig.ustar_structure",
+        "--ustar-structure", dest="ustar_structure", default=ModelConfig.ustar_structure, choices=USTAR_STRUCTURES,
+        help=f"The law u* follows (default {ModelConfig.ustar_structure}). See ModelConfig.ustar_structure",
     )
     parser.add_argument(
-        "--knots", nargs="+", default=["2013Q1"], metavar="QUARTER",
-        help="Interior knot dates for the spline state (default 2013Q1)",
+        "--knots", nargs="+", default=list(ModelConfig.spline_knots), metavar="QUARTER",
+        help=f"Interior knot dates for the spline state (default {' '.join(ModelConfig.spline_knots)})",
     )
-    parser.add_argument("--taper-sigma-early", type=float, default=ModelConfig.taper_sigma_early,
-                        help=f"Taper: u* innovation sd at the start (default {ModelConfig.taper_sigma_early:g})")
-    parser.add_argument("--taper-sigma-late", type=float, default=ModelConfig.taper_sigma_late,
-                        help=f"Taper: u* innovation sd from --taper-end on (default {ModelConfig.taper_sigma_late:g})")
+    parser.add_argument("--taper-sigma-early", type=float, default=None,
+                        help=f"Taper: u* innovation sd at the start {_scale_help('sigma_early')}")
+    parser.add_argument("--taper-sigma-late", type=float, default=None,
+                        help=f"Taper: u* innovation sd from --taper-end on {_scale_help('sigma_late')}")
     parser.add_argument("--taper-end", default=ModelConfig.taper_end,
                         help=f"Taper: quarter the sd reaches its late value (default {ModelConfig.taper_end})")
-    parser.add_argument("--taper-init-mu", type=float, default=ModelConfig.taper_init_mu,
-                        help=f"Taper: prior mean for u* in the first quarter (default {ModelConfig.taper_init_mu:g})")
-    parser.add_argument("--taper-init-sd", type=float, default=ModelConfig.taper_init_sd,
-                        help=f"Taper: prior sd on u* in the first quarter (default {ModelConfig.taper_init_sd:g})")
+    parser.add_argument("--taper-init-mu", type=float, default=None,
+                        help=f"Taper: prior mean for u* in the first quarter {_scale_help('init_mu')}")
+    parser.add_argument("--taper-init-sd", type=float, default=None,
+                        help=f"Taper: prior sd on u* in the first quarter {_scale_help('init_sd')}")
+    parser.add_argument("--stepped-walk", action="store_true",
+                        help="Taper: no taper, the early step size to --stepped-walk-end and the late one after")
+    parser.add_argument("--stepped-walk-end", default=STEPPED_WALK_END, metavar="QUARTER",
+                        help=f"Stepped walk: last quarter at the early step size (default {STEPPED_WALK_END})")
     parser.add_argument(
         "--ustar-drift", action="store_true",
         help="Let u* drift down while inflation expectations sit above target, "
@@ -158,15 +188,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="NUTS target acceptance rate; raise it if the run reports divergences",
     )
 
-    add_run_args(parser, prefix="ystar_ustar")
+    add_run_args(parser, prefix=DEFAULT_PREFIX)
     parser.add_argument(
         "--chart-dir", default=None,
-        help="Where to write charts (default charts/YStarUStar). Use a separate "
-             "directory for variant runs: charting clears its directory first",
+        help=f"Where to write charts (default {CHART_DIR.name} for the default prefix, "
+             f"{CHART_DIR.name}-<prefix> otherwise, since charting clears its directory first)",
     )
     parser.add_argument(
         "--compare", action="store_true",
-        help="Chart nine specifications side by side (u* structure x gap definition, plus the taper), "
+        help="Chart ten specifications side by side (u* structure x gap definition, plus the two walks), "
              "re-estimating any not run today; with --analyse-only, chart the saved runs "
              "as they stand. See MODEL_NOTES, 'Comparing specifications'",
     )
@@ -182,6 +212,9 @@ def run_from_args(args: argparse.Namespace) -> None:
             anchor=args.anchor,
             anchor_phase=args.anchor_phase,
             gap_spec=args.gap_spec,
+            slack=args.slack,
+            share_sigma_early=args.share_sigma_early,
+            share_sigma_late=args.share_sigma_late,
             gap_pi_basis=args.gap_pi_basis,
             sigma_c=args.sigma_c,
             ratio_ystar=args.ratio_ystar,
@@ -193,6 +226,7 @@ def run_from_args(args: argparse.Namespace) -> None:
             two_sided_c=args.two_sided_c,
             two_sided_beta=not args.one_sided_beta,
             beta_okun_prior_sd=args.beta_prior_sd,
+            beta_okun_prior_mu=args.beta_prior_mu,
             # The identity gap carries GDP's own noise, which leaves the Okun
             # residual as the only place for it, so the sd is estimated there
             # whether or not --free-sigma-okun was passed.
@@ -209,6 +243,8 @@ def run_from_args(args: argparse.Namespace) -> None:
             taper_end=args.taper_end,
             taper_init_mu=args.taper_init_mu,
             taper_init_sd=args.taper_init_sd,
+            stepped_walk=args.stepped_walk,
+            stepped_walk_end=args.stepped_walk_end,
             exclude_window=None if args.no_exclude_window else tuple(args.exclude_window),
             exclude_scope=args.exclude_scope,
             include_phillips=not args.no_phillips,

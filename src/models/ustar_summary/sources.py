@@ -8,12 +8,11 @@ SEVERAL LINES, AND NOT INDEPENDENT VOTES. Every one is fitted to the same
 unemployment rate, the same trimmed mean inflation and the same expectations
 series.
 
-- `ustar` reads u* from one Phillips curve. Its three settings differ in the
-  structure imposed on u*: a tapered random walk, or a spline with one or two
-  knots.
-- `ystar_ustar` estimates y* and u* in one likelihood. Only its tapered
-  random walk, on the inflation-defined output gap, is charted here, beside
-  the `ustar` walk it can be read against.
+- `ustar` reads u* from one Phillips curve. Two of its settings are charted:
+  the tapered random walk (its default) and the one-knot spline.
+- `ystar_ustar` estimates y* and u* in one likelihood. Two of its settings
+  are charted: its default, the slack split, which observes underemployment
+  beside unemployment, and the tapered random walk on unemployment alone.
 
 Each source is a specification from its package's `--compare`, found by
 prefix, so the flags that reproduce it, its refresh and its chart directory
@@ -108,9 +107,9 @@ _JOINT = "y*/u*"
 
 # u* structure names, set once so the legend cannot word one structure two
 # ways when both models chart it.
-_WALK = "Random walk"
+_WALK = "Tapered walk"
 _SPLINE_1 = "Spline 1 knot"
-_SPLINE_2 = "Spline 2 knots"
+_SLACK_SPLIT = "Slack split"
 
 # `ustar`'s default run, which is also where the unemployment rate is read.
 _USTAR_DEFAULT = _find(ustar_compare.SPECIFICATIONS, "ustar")
@@ -139,19 +138,20 @@ SOURCES: tuple[UstarSource, ...] = (
         note="one Phillips curve, u* a spline with one knot",
     ),
     UstarSource(
-        model=_USTAR,
-        name=_SPLINE_2,
-        spec=_find(ustar_compare.SPECIFICATIONS, "ustar_sum_k2"),
-        loader=_load_ustar,
-        note="one Phillips curve, u* a spline with two knots",
-    ),
-    UstarSource(
         model=_JOINT,
         name=_WALK,
         spec=_find(joint_compare.SPECIFICATIONS, "yus_sum_taper"),
         loader=_load_joint,
-        note="y* and u* in one likelihood, u* a random walk whose step size tapers to "
-             f"{JointConfig.taper_end}",
+        note="y* and u* in one likelihood, observing unemployment alone, u* a random walk whose "
+             f"step size tapers to {JointConfig.taper_end}",
+    ),
+    UstarSource(
+        model=_JOINT,
+        name=_SLACK_SPLIT,
+        spec=_find(joint_compare.SPECIFICATIONS, "ystar_ustar"),
+        loader=_load_joint,
+        note="y* and u* in one likelihood, observing underemployment beside unemployment; "
+             "u* is unemployment's share of total structural slack; the default run",
     ),
 )
 

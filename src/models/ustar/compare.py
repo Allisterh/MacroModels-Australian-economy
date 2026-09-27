@@ -1,10 +1,11 @@
 """The comparison specifications behind `--compare`, and how to refresh them.
 
 Settings of this model differing in the structure imposed on u*: a random
-walk whose step size tapers, or a spline with one or two knots. Everything else is shared, so
-agreement between them is close to arithmetic and only their disagreement is
-informative. MODEL_NOTES, "Comparing specifications", explains the choice of
-the three and how to read them.
+walk whose step size tapers, a random walk whose step size steps down once, or
+a spline with one or two knots. Everything else is shared, so agreement between
+them is close to arithmetic and only their disagreement is informative.
+MODEL_NOTES, "Comparing specifications", explains the choice of the four and
+how to read them.
 
 Each specification is the command-line flags it would be run with, parsed by
 the same parser as the default run, so the list doubles as the record of what
@@ -23,7 +24,7 @@ import pandas as pd
 
 from src.models.common.staleness import is_current
 from src.models.ustar.analyse import CHART_DIR, run_analysis
-from src.models.ustar.cli import build_parser, run_from_args
+from src.models.ustar.cli import parse_args, run_from_args
 from src.models.ustar.results import load_results
 from src.paths import CHARTS, MODEL_OUTPUTS
 
@@ -70,7 +71,7 @@ class Specification:
     def refresh(self) -> None:
         """Re-estimate this specification into its own prefix."""
         print(f"  re-running {self.label} ({' '.join(self.flags)})", flush=True)
-        run_from_args(build_parser().parse_args([*self.flags, "--prefix", self.prefix, "--no-analyse"]))
+        run_from_args(parse_args([*self.flags, "--prefix", self.prefix, "--no-analyse"]))
 
     def chart(self) -> None:
         """Write this specification's own charts from its saved run."""
@@ -79,7 +80,8 @@ class Specification:
 
 # Colour carries the u* structure and knot count.
 SPECIFICATIONS: list[Specification] = [
-    Specification("Random walk", "ustar", [], "brown", "-", default=True),
+    Specification("Tapered walk", "ustar", [], "brown", "-", default=True),
+    Specification("Stepped walk", "ustar_sum_stepped", ["--stepped-walk"], "darkblue", "-"),
     Specification("Spline 1 knot", "ustar_sum_k1",
                   ["--ustar-structure", "spline", "--knots", "2013Q1"], "darkorange", "-"),
     Specification("Spline 2 knots", "ustar_sum_k2",

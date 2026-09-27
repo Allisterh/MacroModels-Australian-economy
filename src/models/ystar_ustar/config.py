@@ -28,12 +28,15 @@ one of those two arguments.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from src.paths import CHARTS, MODEL_OUTPUTS
 
 DEFAULT_OUTPUT_DIR = MODEL_OUTPUTS
 CHART_DIR = CHARTS / "YStarUStar"
+# The default run's filename prefix. It alone charts to `CHART_DIR`; any other
+# prefix charts beside it, so a variant run never clears the default's charts.
+DEFAULT_PREFIX = "ystar_ustar"
 
 # Inherited from ystar: the pandemic quarters that carry no likelihood.
 DEFAULT_EXCLUDE_WINDOW = ("2020Q2", "2021Q3")
@@ -58,6 +61,42 @@ GAP_SPECS = ("defined", "cycle", "identity")
 #   "spline"   — a natural cubic spline, deterministic given its coefficients
 #   "taper"    — a driftless random walk whose sd falls from loose to tight by `taper_end`
 USTAR_STRUCTURES = ("walk", "decay", "spline", "taper")
+
+# The labour-market slack measure the Okun equation and the Phillips curve read.
+# "unemployment" is the unemployment rate; "underutilisation" adds the
+# underemployed, so u* becomes the underutilisation rate consistent with stable
+# inflation, on a scale roughly twice as high. "both" observes unemployment and
+# underemployment separately: one walk for total structural slack s*, another for
+# unemployment's share of it, so u* = share x s* and ue* = (1 - share) x s*. Each
+# series has its own Okun equation on the shared gap and its own Phillips slope.
+# A flat s* with a falling share is slack moving into underemployment; a falling
+# s* is a fall in slack.
+SLACK_MEASURES = ("unemployment", "underutilisation", "both")
+
+
+class WalkScale(NamedTuple):
+    """The walk's first-quarter prior and step sizes, on one slack measure's scale."""
+
+    init_mu: float
+    init_sd: float
+    sigma_early: float
+    sigma_late: float
+
+
+# The walk's settings by slack measure, since the star lives on that measure's
+# scale. Unemployment's are the tapered walk's own judgement (see the taper
+# fields). The other two walk on the underutilisation scale, roughly twice as
+# high and twice as mobile, so their prior and steps are doubled; under "both" the
+# walk is total structural slack s*. Any explicit setting overrides the table.
+WALK_SCALES: dict[str, WalkScale] = {
+    "unemployment": WalkScale(init_mu=8.0, init_sd=5.0, sigma_early=0.175, sigma_late=0.03),
+    "underutilisation": WalkScale(init_mu=16.0, init_sd=10.0, sigma_early=0.35, sigma_late=0.06),
+    "both": WalkScale(init_mu=17.0, init_sd=10.0, sigma_early=0.35, sigma_late=0.06),
+}
+
+# Where the stepped walk's large step size ends: the end of the charts' shaded
+# early window, so u* is free through the fast fall in unemployment over 2002-04.
+STEPPED_WALK_END = "2003Q4"
 
 # Which form the Okun relation takes. See `_okun_equation`.
 #   "gap" — u = u* - beta x gap + e_o, a level relation
@@ -144,6 +183,26 @@ class ModelConfig:
     # equation no longer contributing, which makes that imposed variance
     # load-bearing in a way it is not under the other two specs.
     gap_spec: str = "defined"
+
+    # The slack measure the labour-market equations read. See SLACK_MEASURES.
+    # The slack split by default: it observes underemployment beside
+    # unemployment, which is what lets the model tell a fall in u* from slack
+    # moving into underemployment. The walk's scale follows it (WALK_SCALES).
+    slack: str = "both"
+    # Under slack "both", u*'s taper settings apply to s*, and unemployment's share
+    # of s* walks on the logit scale on its own tapered schedule, ending at
+    # `taper_end`. The start centres the share near 0.6, unemployment's share of
+    # underutilisation in 1993, and is wide. All asserted.
+    #
+    # The late step was swept at 0.02, 0.05 and 0.10. The composition split does
+    # not depend on it: total slack and the share move the same in all three. What
+    # a looser share buys is quarter-to-quarter wiggle in u* that lines up with
+    # unemployment's own moves, and a weaker underemployment Phillips slope. So
+    # the tightest of the three.
+    share_init_mu: float = 0.4
+    share_init_sd: float = 1.0
+    share_sigma_early: float = 0.10
+    share_sigma_late: float = 0.02
 
     # --- Sample ---
     start: str | None = "1993Q1"
@@ -270,6 +329,10 @@ class ModelConfig:
     # against 1.252 in its top, a swing of 0.144 against beta's own posterior
     # sd of 0.21. Widening the prior tests whether that matters.
     beta_okun_prior_sd: float = 0.5
+    # The prior's centre, inherited from `ustar`: roughly textbook Okun for the
+    # unemployment rate. A slack measure on another scale moves more per point
+    # of output gap and wants a centre scaled to match.
+    beta_okun_prior_mu: float = 0.5
 
     # The Okun residual sd, IMPOSED rather than sampled. None restores the free
     # version, which is the comparison this value rests on.
@@ -370,15 +433,15 @@ class ModelConfig:
     # "spline"   a natural cubic spline in `spline_knots`, deterministic given
     #            its coefficients.
     #
-    # "spline" by default, on the endpoint. Under "decay" the sign of
-    # phi x (eq - u*) is fixed by which side of the equilibrium the state
-    # opened on, so from an opening level of 10.77 it can only ever report a
-    # fall. On the previous vintage that law took u* from 10.769 to 4.741, of
-    # which 5.961 of the 6.027 was the zero-innovation curve: the 134
-    # innovations moved it by at most 0.162 anywhere, and by 0.002 over the
-    # last two years, u* having asymptoted onto `ustar_eq`. The endpoint was
-    # a fitted scalar, not a reading of recent quarters. A spline can turn.
-    ustar_structure: str = "spline"
+    # "taper"    a driftless random walk whose step size falls from loose to
+    #            tight by `taper_end`, flat after it.
+    #
+    # "taper" by default, as a judgement rather than on a score. It imposes the
+    # least structure: the spline fixes where u* may bend, and its path through
+    # the 1990s and 2000s is set by the knot rather than by the data, while the
+    # walk fixes only how far u* may move each quarter. "decay" can only draw
+    # a monotone approach to one equilibrium, so it cannot report a rise.
+    ustar_structure: str = "taper"
 
     # Interior knot dates. One knot gives three coefficients after the natural
     # boundary reduction, which is stiff: enough to decline and then level off,
@@ -401,17 +464,26 @@ class ModelConfig:
     # equation pulls u* towards unemployment and a walk has the freedom to
     # follow: looser schedules put u* on top of unemployment through every
     # cycle, collapse `sigma_v`, and erase the tightness of 2007-08 and
-    # 2022-23 while inflation ran above the band. At these values u* stays
-    # clear of the cycle after 2002, while the looser start lets it follow
-    # unemployment down through the 1990s, reading that decline as largely
-    # structural.
-    taper_sigma_early: float = 0.15
-    taper_sigma_late: float = 0.02
+    # 2022-23 while inflation ran above the band. These values are a judgement
+    # on that trade: loose enough for u* to settle after the fast fall in
+    # unemployment over 2002-04, at the cost of some dip with the tight labour
+    # market of 2022-23 and a somewhat smaller `sigma_v`.
+    #
+    # The prior on the first quarter is centred below the 1993Q1 rate, which was
+    # deep slack, and wide, so the likelihood places the start.
+    #
+    # None means "take the slack measure's value from WALK_SCALES"; read the
+    # resolved settings through `walk`.
+    taper_sigma_early: float | None = None
+    taper_sigma_late: float | None = None
     taper_end: str = "2002Q1"
-    # Prior on the first quarter: centred below the 1993Q1 unemployment rate,
-    # which was deep slack, and wide, so the likelihood places the start.
-    taper_init_mu: float = 8.0
-    taper_init_sd: float = 5.0
+    taper_init_mu: float | None = None
+    taper_init_sd: float | None = None
+    # The stepped walk: no taper, the early step size from the start to
+    # `stepped_walk_end`, then the late one. Both step sizes are the taper's,
+    # so the two walks differ only in how the step falls.
+    stepped_walk: bool = False
+    stepped_walk_end: str = STEPPED_WALK_END
 
     # --- The pandemic window ---
     # `ystar` drops 2020Q2-2021Q3 from its likelihood on the ground that
@@ -469,12 +541,28 @@ class ModelConfig:
                 "has to be estimated; drop --sigma-okun",
             )
 
+    def _validate_labour_equations(self) -> None:
+        """Check the Okun form and the slack measure the labour-market equations read."""
+        if self.okun_form not in OKUN_FORMS:
+            raise ValueError(f"okun_form must be one of {OKUN_FORMS}, got {self.okun_form!r}")
+        if self.slack not in SLACK_MEASURES:
+            raise ValueError(f"slack must be one of {SLACK_MEASURES}, got {self.slack!r}")
+        if self.slack == "both" and (
+            self.ustar_structure != "taper" or self.okun_form != "gap" or self.gap_spec == "cycle"
+        ):
+            raise ValueError(
+                "slack 'both' (the default) needs the taper structure, the level Okun form and a "
+                "non-cycle gap; add --slack unemployment for the others",
+            )
+
     def _validate_ustar_structure(self) -> None:
         """Check the u* state law and the settings that belong to only one of them."""
         if self.ustar_structure not in USTAR_STRUCTURES:
             raise ValueError(f"ustar_structure must be one of {USTAR_STRUCTURES}, got {self.ustar_structure!r}")
         if self.ustar_structure == "spline" and not self.spline_knots:
             raise ValueError("the spline state law needs at least one interior knot")
+        if self.stepped_walk and self.ustar_structure != "taper":
+            raise ValueError(f"stepped_walk reshapes the taper; ustar_structure is {self.ustar_structure!r}")
         # A drift and an equilibrium are two stories about the same fact, and
         # the spline tells neither.
         if self.ustar_drift and self.ustar_structure != "walk":
@@ -521,8 +609,7 @@ class ModelConfig:
         self._validate_anchor()
         self._validate_ustar_structure()
         self._validate_identity_gap()
-        if self.okun_form not in OKUN_FORMS:
-            raise ValueError(f"okun_form must be one of {OKUN_FORMS}, got {self.okun_form!r}")
+        self._validate_labour_equations()
         if self.sigma_okun is not None and self.sigma_okun <= 0:
             raise ValueError(f"sigma_okun must be positive, got {self.sigma_okun}")
         if self.sigma_v is not None and self.sigma_v < 0:
@@ -540,6 +627,17 @@ class ModelConfig:
         }
 
     @property
+    def walk(self) -> WalkScale:
+        """Return the walk's settings: each explicit one, else the slack measure's from WALK_SCALES."""
+        scale = WALK_SCALES[self.slack]
+        return WalkScale(
+            init_mu=scale.init_mu if self.taper_init_mu is None else self.taper_init_mu,
+            init_sd=scale.init_sd if self.taper_init_sd is None else self.taper_init_sd,
+            sigma_early=scale.sigma_early if self.taper_sigma_early is None else self.taper_sigma_early,
+            sigma_late=scale.sigma_late if self.taper_sigma_late is None else self.taper_sigma_late,
+        )
+
+    @property
     def constants(self) -> dict[str, Any]:
         """Imposed values worth recording in the trace metadata."""
         recorded: dict[str, Any] = {
@@ -548,6 +646,13 @@ class ModelConfig:
             "anchor_phase": self.anchor_phase,
             "ustar_structure": self.ustar_structure,
             "gap_spec": self.gap_spec,
+            "slack": self.slack,
+            **({
+                "share_init_mu": self.share_init_mu,
+                "share_init_sd": self.share_init_sd,
+                "share_sigma_early": self.share_sigma_early,
+                "share_sigma_late": self.share_sigma_late,
+            } if self.slack == "both" else {}),
             "okun_form": self.okun_form,
         }
         if self.ustar_structure == "spline":
@@ -558,11 +663,14 @@ class ModelConfig:
         if self.ustar_structure == "taper":
             # The single sigma_ustar is unused; the schedule is what was imposed.
             recorded["sigma_ustar"] = float("nan")
-            recorded["taper_sigma_early"] = self.taper_sigma_early
-            recorded["taper_sigma_late"] = self.taper_sigma_late
+            walk = self.walk
+            recorded["taper_sigma_early"] = walk.sigma_early
+            recorded["taper_sigma_late"] = walk.sigma_late
             recorded["taper_end"] = self.taper_end
-            recorded["taper_init_mu"] = self.taper_init_mu
-            recorded["taper_init_sd"] = self.taper_init_sd
+            recorded["taper_init_mu"] = walk.init_mu
+            recorded["taper_init_sd"] = walk.init_sd
+            if self.stepped_walk:
+                recorded["stepped_walk_end"] = self.stepped_walk_end
         if self.sigma_v is not None:
             recorded["sigma_v"] = self.sigma_v
         return recorded

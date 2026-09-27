@@ -28,8 +28,14 @@ ACTUAL_GAP_HEADER = "actual_gap_header"
 EXCLUDED_WINDOW = "excluded_window"
 # Early quarters where the level is set by the state law rather than the data.
 UNIDENTIFIED_WINDOW = "unidentified_window"
+# The labour-market slack measure the charts name, as a capitalised noun
+# ("Unemployment"), from which "Unemployment rate" and "Unemployment gap" are built.
+SLACK = "slack"
+DEFAULT_SLACK = "Unemployment"
 
-_NAMES = frozenset({LFOOTER, LFOOTER_BAND, RFOOTER_FALLBACK, ACTUAL_GAP_HEADER, EXCLUDED_WINDOW, UNIDENTIFIED_WINDOW})
+_NAMES = frozenset({
+    LFOOTER, LFOOTER_BAND, RFOOTER_FALLBACK, ACTUAL_GAP_HEADER, EXCLUDED_WINDOW, UNIDENTIFIED_WINDOW, SLACK,
+})
 
 Window = tuple[str, str]
 

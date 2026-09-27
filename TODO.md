@@ -93,6 +93,14 @@ data rather than a numerical artefact.
 
 ## 3. Loose ends in maintained code
 
+- **`S603`, 2 sites: `gstar_summary/sources.py` and `rstar_summary/sources.py`.** Each
+  re-runs a stale model by launching its run script with `subprocess.run`, which S603
+  flags whenever the argument list is not a literal; no small edit clears it. The code
+  fix is to re-run in-process, each source carrying a run function built from the
+  model's own parser or `--compare` specification, as `ustar_summary` already does.
+  Costs to weigh first: no timeout on a hung model, and `rstar_bonds`, `rstar_rba` and
+  `rstar_qpm` sharing one process (chart directory, compiled-model caches), untested.
+  Not a `pyproject.toml` ignore without discussing it first.
 - **`PLR0917`, 35 sites, 20 maintained.** More than five positional arguments;
   the worst take 11. Reviewed and deliberately left: the one-character `*` fix
   needs every caller checked, and the tempting alternative (bundle into a config

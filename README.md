@@ -13,7 +13,7 @@ and what should not be quoted from it. The links below go there; this page is on
 - **Inflation Expectations** (`expectations`): latent inflation expectations from surveys and market data. See [notes](src/models/expectations/MODEL_NOTES.md)
 - **y\* potential output** (`ystar`): potential as a slow-moving random walk, with the output gap defined by inflation's deviation from target. See [notes](src/models/ystar/MODEL_NOTES.md)
 - **u\*** (`ustar`): a NAIRU from one expectations-augmented Phillips curve, with u\* a random walk. See [notes](src/models/ustar/MODEL_NOTES.md)
-- **Joint y\*/u\*** (`ystar_ustar`): both of the above in one likelihood, with the gap partly free and u\* a spline. See [notes](src/models/ystar_ustar/MODEL_NOTES.md)
+- **Joint y\*/u\*** (`ystar_ustar`): both of the above in one likelihood, with the gap partly free, and unemployment and underemployment observed together. See [notes](src/models/ystar_ustar/MODEL_NOTES.md)
 - **Cobb-Douglas MFP** (`cobb_douglas`): deterministic growth accounting into capital, labour and MFP. See [notes](src/models/cobb_douglas/MODEL_NOTES.md)
 - **g\* summary** (`gstar_summary`): every potential-growth estimate on one chart. See [notes](src/models/gstar_summary/MODEL_NOTES.md)
 - **u\* summary** (`ustar_summary`): four u\* specifications from `ustar` and `ystar_ustar` on one chart. See [notes](src/models/ustar_summary/MODEL_NOTES.md)
@@ -100,7 +100,7 @@ src/
     │                           #   (self-contained: imports only src/data)
     ├── ustar/                  # u* from one Phillips curve, u* a random walk
     │                           #   (reads expectations and ystar output)
-    ├── ystar_ustar/            # y* and u* estimated jointly, gap partly free, u* a spline
+    ├── ystar_ustar/            # y* and u* estimated jointly, gap partly free, slack split
     │                           #   (preferred for the output gap and u*)
     │                           #   (a rule, not an estimate: no likelihood, no priors)
     ├── rstar_bonds/            # r* from the bond market: AU wedge over world r*, two windows

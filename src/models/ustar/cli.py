@@ -6,12 +6,27 @@ comparison can use it without importing the entry point that imports it.
 """
 
 import argparse
+from collections.abc import Sequence
+
+import pandas as pd
 
 from src.models.common.cli import add_run_args, add_sampler_args
 from src.models.ustar.analyse import run_analysis
-from src.models.ustar.config import GAP_SOURCES, USTAR_STRUCTURES, ModelConfig
+from src.models.ustar.config import (
+    FLAT_WALK_INIT_MU,
+    FLAT_WALK_INIT_SD,
+    FLAT_WALK_START,
+    GAP_SOURCES,
+    STEPPED_WALK_END,
+    USTAR_STRUCTURES,
+    ModelConfig,
+)
 from src.models.ustar.estimate import run_estimate
 from src.models.ystar.base import SamplerConfig
+
+# Where the named walks write unless --prefix is given, so neither overwrites the default run.
+FLAT_WALK_PREFIX = "ustar_flat_walk"
+STEPPED_WALK_PREFIX = "ustar_stepped_walk"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -82,6 +97,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Estimate the drift under a constrained prior instead of imposing it",
     )
 
+    walks = parser.add_mutually_exclusive_group()
+    walks.add_argument(
+        "--flat-walk", action="store_true",
+        help=f"The random walk from {FLAT_WALK_START} with one flat step size, start prior "
+             f"N({FLAT_WALK_INIT_MU:g}, {FLAT_WALK_INIT_SD:g}), prefix {FLAT_WALK_PREFIX}; "
+             "flags given explicitly still win. See MODEL_NOTES, 'The flat walk'",
+    )
+    walks.add_argument(
+        "--stepped-walk", action="store_true",
+        help="The random walk with no taper: the early step size to --stepped-walk-end, the late one "
+             f"after, prefix {STEPPED_WALK_PREFIX}. See MODEL_NOTES, 'The stepped walk'",
+    )
+    parser.add_argument("--stepped-walk-end", default=STEPPED_WALK_END, metavar="QUARTER",
+                        help=f"Stepped walk: last quarter at the early step size (default {STEPPED_WALK_END})")
+
     parser.add_argument(
         "--compare", action="store_true",
         help="Instead of the default run, re-estimate the comparison specifications that are "
@@ -91,6 +121,38 @@ def build_parser() -> argparse.ArgumentParser:
     add_sampler_args(parser)
     add_run_args(parser, prefix="ustar")
     return parser
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse the flags, applying the --flat-walk or --stepped-walk settings as defaults.
+
+    As defaults, so any flag given explicitly overrides them. The stepped walk only
+    needs its own prefix; the model builds its schedule from the taper's step sizes.
+    The flat walk drops the taper: the early step and the taper end are derived after
+    parsing, from the late step and the start, so that overriding either carries
+    through rather than leaving a one-quarter taper.
+    """
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.stepped_walk:
+        parser.set_defaults(prefix=STEPPED_WALK_PREFIX)
+        return parser.parse_args(argv)
+    if not args.flat_walk:
+        return args
+    parser.set_defaults(
+        start=FLAT_WALK_START,
+        ustar_init=FLAT_WALK_INIT_MU,
+        taper_init_sd=FLAT_WALK_INIT_SD,
+        taper_sigma_early=None,
+        taper_end=None,
+        prefix=FLAT_WALK_PREFIX,
+    )
+    args = parser.parse_args(argv)
+    if args.taper_sigma_early is None:
+        args.taper_sigma_early = args.taper_sigma_late
+    if args.taper_end is None:
+        args.taper_end = str(pd.Period(args.start, freq="Q") + 1)
+    return args
 
 
 def config_from_args(args: argparse.Namespace) -> ModelConfig:
@@ -114,6 +176,8 @@ def config_from_args(args: argparse.Namespace) -> ModelConfig:
         taper_sigma_late=args.taper_sigma_late,
         taper_end=args.taper_end,
         taper_init_sd=args.taper_init_sd,
+        stepped_walk=args.stepped_walk,
+        stepped_walk_end=args.stepped_walk_end,
         free_sigma_ustar=args.free_sigma_ustar,
         ustar_drift=args.ustar_drift,
         ustar_drift_end=args.ustar_drift_end,

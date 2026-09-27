@@ -5,7 +5,9 @@ Seven series on one aligned quarterly sample:
 - log GDP x 100                        (ABS 5206.0, chain volume, SA)
 - trimmed mean inflation, y/y %        (ABS 6401.0)  -> defines the gap
 - trimmed mean inflation, q/q %        (ABS 6401.0)  -> the Phillips curve's LHS
-- unemployment rate, %                 (ABS 1364.0.15.003 via `labour_force`)
+- unemployment rate, %                 (ABS 1364.0.15.003 via `labour_force`), or
+  the underutilisation rate, %          (ABS 6202.0) under `--slack underutilisation`
+- underemployment rate, %               (ABS 6202.0), added under `--slack both`
 - inflation expectations, %            (the `expectations` model's saved output)
 - import price growth, lagged annual   (ABS 6457.0)
 - GSCPI, lagged                        (live series)
@@ -45,7 +47,11 @@ from src.data.gdp import get_log_gdp
 from src.data.gscpi_live import get_gscpi_qrtly_live
 from src.data.import_prices import get_import_price_growth_lagged_annual
 from src.data.inflation import get_trimmed_mean_annual, get_trimmed_mean_qrtly
-from src.data.labour_force import get_unemployment_rate_qrtly
+from src.data.labour_force import (
+    get_underemployment_rate_qrtly,
+    get_underutilisation_rate_qrtly,
+    get_unemployment_rate_qrtly,
+)
 from src.models.common.sources import SourceSet
 
 _NAME_WIDTH = 34
@@ -94,6 +100,7 @@ def build_observations(
     *,
     gap_pi_basis: str = "annual",
     include_phillips: bool = True,
+    slack: str = "unemployment",
     verbose: bool = False,
 ) -> tuple[dict[str, np.ndarray], pd.PeriodIndex, pd.DataFrame, SourceSet]:
     """Build observation arrays for joint estimation.
@@ -101,7 +108,8 @@ def build_observations(
     `gap_pi_basis` selects the series the gap is defined on. "quarterly" is the
     quarterly rate multiplied by four, so it sits on the anchor's scale; see
     `ModelConfig.gap_pi_basis` for why this is a switch and not a settled
-    choice.
+    choice. `slack` selects the labour-market series observed as `u`: the
+    unemployment rate or the underutilisation rate.
 
     Returns:
         Tuple of:
@@ -121,8 +129,14 @@ def build_observations(
     columns: dict[str, pd.Series] = {
         "log_gdp": sources.take(get_log_gdp(), "log GDP", key="log_gdp"),
         "pi_gap": gap_pi,
-        "u": sources.take(get_unemployment_rate_qrtly(), "unemployment rate", key="u"),
+        "u": (
+            sources.take(get_underutilisation_rate_qrtly(), "underutilisation rate", key="u")
+            if slack == "underutilisation"
+            else sources.take(get_unemployment_rate_qrtly(), "unemployment rate", key="u")
+        ),
     }
+    if slack == "both":
+        columns["ue"] = sources.take(get_underemployment_rate_qrtly(), "underemployment rate", key="ue")
 
     if include_phillips:
         columns["pi_qtr"] = sources.take(get_trimmed_mean_qrtly(), "trimmed mean q/q", key="pi_qtr")

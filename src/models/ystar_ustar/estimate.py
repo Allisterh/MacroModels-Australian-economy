@@ -82,6 +82,90 @@ def _observe(
     pm.Normal(name, mu=mu[rows], sigma=sigma, observed=observed[rows])
 
 
+def _step_schedule(config: ModelConfig) -> str:
+    """Describe the walk's step-size schedule for the run log, tapered or stepped."""
+    if config.stepped_walk:
+        return f"sigma {config.walk.sigma_early:g} to {config.stepped_walk_end}, then {config.walk.sigma_late:g}"
+    return (
+        f"sigma {config.walk.sigma_early:g} tapering to {config.walk.sigma_late:g} "
+        f"at {config.taper_end}, then flat"
+    )
+
+
+def _star_walk(model: pm.Model, config: ModelConfig, obs_index: pd.PeriodIndex, *, name: str) -> pt.TensorVariable:
+    """Add the walk as `name` on the slack measure's scale: tapered, or stepped under `config.stepped_walk`."""
+    walk = config.walk
+    if config.stepped_walk:
+        # No taper: the late step throughout, raised to the early step by a
+        # window from the second quarter, the first having its own prior.
+        second = str(obs_index[1])
+        return tapered_walk(
+            model, obs_index, name=name,
+            early=walk.sigma_late, late=walk.sigma_late, end=second,
+            init_mu=walk.init_mu, init_sd=walk.init_sd,
+            windows=((second, config.stepped_walk_end, walk.sigma_early),),
+        )
+    return tapered_walk(
+        model, obs_index, name=name,
+        early=walk.sigma_early, late=walk.sigma_late, end=config.taper_end,
+        init_mu=walk.init_mu, init_sd=walk.init_sd,
+    )
+
+
+def _slack_split(model: pm.Model, config: ModelConfig, obs_index: pd.PeriodIndex) -> pt.TensorVariable:
+    """Build u* as unemployment's share of total structural slack, and ue* as the rest.
+
+    s* walks on the taper settings; the share walks on the logit scale on its own
+    schedule. `uestar`, `sstar` and `ushare` are recorded for the charts, and u*
+    is returned under its usual name so every u* chart and consumer reads it
+    unchanged.
+    """
+    sstar = _star_walk(model, config, obs_index, name="sstar")
+    share_logit = tapered_walk(
+        model, obs_index, name="ushare_logit",
+        early=config.share_sigma_early, late=config.share_sigma_late, end=config.taper_end,
+        init_mu=config.share_init_mu, init_sd=config.share_init_sd,
+    )
+    with model:
+        share = pm.Deterministic("ushare", pm.math.sigmoid(share_logit))
+        pm.Deterministic("uestar", (1.0 - share) * sstar)
+        return pm.Deterministic("ustar", share * sstar)
+
+
+def _okun_underemployment(
+    obs: dict[str, np.ndarray],
+    model: pm.Model,
+    uestar: pt.TensorVariable,
+    gap: pt.TensorVariable,
+    *,
+    config: ModelConfig,
+    keep: np.ndarray | None,
+) -> str:
+    """Fit ue = ue* - beta_ue x gap + e_ue: underemployment on the same gap as unemployment.
+
+    Same prior and imposed noise as the unemployment equation, since both series
+    are on the same scale; the shared gap is what ties their cycles together.
+    """
+    with model:
+        prior = {"mu": config.beta_okun_prior_mu, "sigma": config.beta_okun_prior_sd}
+        if not config.two_sided_beta:
+            prior["lower"] = 0.0
+        constant = {} if config.sigma_okun is None else {"sigma_okun_ue": config.sigma_okun}
+        mc = set_model_coefficients(
+            model,
+            {"beta_okun_ue": prior, "sigma_okun_ue": {"sigma": 1.0}},
+            constant=constant,
+        )
+        _observe(
+            "observed_ue",
+            uestar - mc["beta_okun_ue"] * gap,
+            mc["sigma_okun_ue"],
+            np.asarray(obs["ue"], dtype=float),
+            keep,
+        )
+    return "ue = ue* - beta_ue x gap + e_ue"
+
+
 def _ustar_spline(model: pm.Model, config: ModelConfig, obs_index: pd.PeriodIndex) -> pt.TensorVariable:
     """u* as a natural cubic spline with knots at `config.spline_knots`.
 
@@ -125,6 +209,7 @@ def _ustar_state(
         attach(model, {
             "sigma_v_prior": config.sigma_v_prior,
             "beta_okun_prior_sd": config.beta_okun_prior_sd,
+            "beta_okun_prior_mu": config.beta_okun_prior_mu,
             "two_sided_c": config.two_sided_c,
             "two_sided_beta": config.two_sided_beta,
         })
@@ -133,12 +218,10 @@ def _ustar_state(
     # and `results` reads `anchor` from here to draw the inflation decomposition.
     if config.ustar_structure == "spline":
         return _ustar_spline(model, config, obs_index)
+    if config.ustar_structure == "taper" and config.slack == "both":
+        return _slack_split(model, config, obs_index)
     if config.ustar_structure == "taper":
-        return tapered_walk(
-            model, obs_index, name="ustar",
-            early=config.taper_sigma_early, late=config.taper_sigma_late, end=config.taper_end,
-            init_mu=config.taper_init_mu, init_sd=config.taper_init_sd,
-        )
+        return _star_walk(model, config, obs_index, name="ustar")
 
     with model:
         drift: Any = 0.0
@@ -394,7 +477,7 @@ def _okun_error_correction(
     du = u[1:] - u[:-1]
 
     with model:
-        prior = {"mu": 0.5, "sigma": config.beta_okun_prior_sd}
+        prior = {"mu": config.beta_okun_prior_mu, "sigma": config.beta_okun_prior_sd}
         if not config.two_sided_beta:
             prior["lower"] = 0.0
         constant = {} if config.sigma_okun is None else {"sigma_okun": config.sigma_okun}
@@ -477,7 +560,7 @@ def _okun_equation(
         return _okun_error_correction(obs, model, ustar, gap, config=config, keep=keep)
 
     with model:
-        prior = {"mu": 0.5, "sigma": config.beta_okun_prior_sd}
+        prior = {"mu": config.beta_okun_prior_mu, "sigma": config.beta_okun_prior_sd}
         if not config.two_sided_beta:
             prior["lower"] = 0.0
         constant = {} if config.sigma_okun is None else {"sigma_okun": config.sigma_okun}
@@ -550,8 +633,14 @@ def _phillips_equation(
     ustar: pt.TensorVariable,
     anchor: np.ndarray,
     keep: np.ndarray | None,
+    *,
+    uestar: pt.TensorVariable | None = None,
 ) -> str:
     """Fit the price Phillips curve on the quarterly rate, anchored on the target.
+
+    With `uestar` (slack "both"), underemployment's gap enters beside
+    unemployment's with its own slope, `gamma_ue`, so the data say whether
+    underemployment slack moves inflation beyond unemployment slack.
 
     Taken unchanged from `ustar`, including the `(u - u*)/u` gap form so that
     `gamma_pi` stays directly comparable with `ustar`'s and `nairu`'s.
@@ -588,6 +677,12 @@ def _phillips_equation(
             + mc["rho_pi"] * obs["d4pm"]
             + mc["xi_gscpi"] * obs["gscpi"] ** 2 * np.sign(obs["gscpi"])
         )
+        ue_term = ""
+        if uestar is not None:
+            gamma_ue = set_model_coefficients(model, {"gamma_ue": {"mu": -1.5, "sigma": 1.0}})["gamma_ue"]
+            ue = pt.as_tensor_variable(obs["ue"])
+            mu = mu + gamma_ue * pm.Deterministic("uegap", (ue - uestar) / ue)
+            ue_term = " + gamma_ue x ue_gap"
         _observe(
             "observed_pi",
             mu,
@@ -598,8 +693,50 @@ def _phillips_equation(
     label = _anchor_label(anchor)
     return (
         f"pi_q = q({label}) + beta x [q(pi_exp) - q({label})]"
-        " + gamma x u_gap + rho x d4pm + xi x GSCPI^2 + e_p"
+        f" + gamma x u_gap{ue_term} + rho x d4pm + xi x GSCPI^2 + e_p"
     )
+
+
+def _labour_equations(
+    obs: dict[str, np.ndarray],
+    model: pm.Model,
+    *,
+    config: ModelConfig,
+    states: tuple[pt.TensorVariable, pt.TensorVariable | None, pt.TensorVariable],
+    keep: np.ndarray | None,
+) -> list[str]:
+    """Add the Okun and Phillips equations, and return their descriptions.
+
+    `states` is (u*, ue*, gap); ue* is None unless slack is "both", when it gets
+    its own Okun equation and its own Phillips slope. The anchor is read from
+    `obs`, where `build_model` puts it.
+    """
+    ustar, uestar, gap = states
+    anchor = obs["anchor"]
+    descriptions: list[str] = []
+    if config.include_okun:
+        descriptions.append(f"Okun:         {_okun_equation(obs, model, ustar, gap, config=config, keep=keep)}")
+        if uestar is not None:
+            okun_ue = _okun_underemployment(obs, model, uestar, gap, config=config, keep=keep)
+            descriptions.append(f"Okun (ue):    {okun_ue}")
+    if config.include_phillips:
+        phillips = (
+            _phillips_on_gap(obs, model, gap, anchor, keep)
+            if config.gap_spec == "cycle"
+            else _phillips_equation(obs, model, ustar, anchor, keep, uestar=uestar)
+        )
+        descriptions.append(f"Phillips:     {phillips}")
+        if config.gap_spec == "cycle":
+            # The unemployment gap is not a regressor here, but it is still the
+            # model's headline output, so it is recorded for the charts.
+            with model:
+                pm.Deterministic("ugap", (pt.as_tensor_variable(obs["u"]) - ustar) / obs["u"])
+    else:
+        # u* has no nominal content without it, so the headline is recorded here
+        # under a name that does not claim to be a NAIRU.
+        with model:
+            pm.Deterministic("ugap", pt.as_tensor_variable(obs["u"]) - ustar)
+    return descriptions
 
 
 def build_model(
@@ -638,6 +775,7 @@ def build_model(
     descriptions.append(f"Potential:    {desc}")
 
     ustar = _ustar_state(obs, model, config, obs_index)
+    uestar = model["uestar"] if config.slack == "both" else None
     # Saved as a list so the pickle stays plain, and read back by `results.py`
     # for the inflation decomposition, which otherwise assumes a scalar anchor.
     record_constant(model, "anchor_series", anchor.tolist())
@@ -648,11 +786,13 @@ def build_model(
         ),
         "decay": "u*_t = u*_{t-1} + phi x (u*_eq - u*_{t-1}) + e_u   (sigma imposed)",
         "walk": "u*_t = u*_{t-1} + e_u   (sigma imposed)",
-        "taper": (
-            f"u*_t = u*_{{t-1}} + sigma_t x z_t   (sigma {config.taper_sigma_early:g} tapering to "
-            f"{config.taper_sigma_late:g} at {config.taper_end}, then flat)"
-        ),
+        "taper": f"u*_t = u*_{{t-1}} + sigma_t x z_t   ({_step_schedule(config)})",
     }[config.ustar_structure]
+    if uestar is not None:
+        nairu_state = (
+            f"s*_t a walk ({_step_schedule(config)}); u* = share x s*, ue* = (1 - share) x s*, "
+            f"logit(share) a walk (sigma {config.share_sigma_early:g} tapering to {config.share_sigma_late:g})"
+        )
     descriptions.append(f"NAIRU:        {nairu_state}")
 
     gap, gap_desc = _gap_equation(obs, model, config, latents)
@@ -665,27 +805,7 @@ def build_model(
     else:
         descriptions.append(f"Output:       {_gdp_equation(obs, model, latents, gap, keep_gdp)}")
 
-    if config.include_okun:
-        descriptions.append(
-            f"Okun:         {_okun_equation(obs, model, ustar, gap, config=config, keep=keep_other)}",
-        )
-    if config.include_phillips:
-        phillips = (
-            _phillips_on_gap(obs, model, gap, anchor, keep_other)
-            if config.gap_spec == "cycle"
-            else _phillips_equation(obs, model, ustar, anchor, keep_other)
-        )
-        descriptions.append(f"Phillips:     {phillips}")
-        if config.gap_spec == "cycle":
-            # The unemployment gap is not a regressor here, but it is still the
-            # model's headline output, so it is recorded for the charts.
-            with model:
-                pm.Deterministic("ugap", (pt.as_tensor_variable(obs["u"]) - ustar) / obs["u"])
-    if not config.include_phillips:
-        # u* has no nominal content without it, so the headline is recorded here
-        # under a name that does not claim to be a NAIRU.
-        with model:
-            pm.Deterministic("ugap", pt.as_tensor_variable(obs["u"]) - ustar)
+    descriptions += _labour_equations(obs, model, config=config, states=(ustar, uestar, gap), keep=keep_other)
 
     if verbose:
         print("\nModel specification:")
@@ -755,7 +875,7 @@ def run_estimate(
         + (
             "u* deterministic given its coefficients"
             if config.ustar_structure == "spline"
-            else f"sigma_ustar {config.taper_sigma_early:g} -> {config.taper_sigma_late:g} by {config.taper_end}"
+            else f"u* step {_step_schedule(config)}"
             if config.ustar_structure == "taper"
             else f"sigma_ustar={config.sigma_ustar:g}"
         ),
@@ -780,6 +900,7 @@ def run_estimate(
         end=config.end,
         gap_pi_basis=config.gap_pi_basis,
         include_phillips=config.include_phillips,
+        slack=config.slack,
         verbose=verbose,
     )
 

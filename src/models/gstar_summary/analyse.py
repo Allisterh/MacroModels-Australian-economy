@@ -34,10 +34,7 @@ def plot_summary(
         annotate=True,
         rounding=2,
     )
-    latest = " | ".join(
-        f"{str(label).split(' (')[0]} {series.dropna().iloc[-1]:.2f}"
-        for label, series in data.items() if series.notna().any()
-    )
+    # No "latest" header: each line's end is annotated with its value already.
     mg.finalise_plot(
         ax,
         title="Australian potential output growth: every model that estimates one",
@@ -45,7 +42,6 @@ def plot_summary(
         y0=True,
         legend={"loc": "best", "fontsize": "x-small"},
         lheader="All share a slowly drifting potential: agreement is not independence",
-        rheader=f"Latest: {latest}",
         rfooter="Built using: ABS",
         lfooter="Australia. ",
         show=False,

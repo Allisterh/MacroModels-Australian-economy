@@ -91,6 +91,16 @@ def _ustar_spline(
         return pm.Deterministic("ustar", pt.dot(pt.as_tensor_variable(design), coef))
 
 
+def _step_schedule(config: ModelConfig) -> str:
+    """Describe the walk's step-size schedule for the run log, tapered or stepped."""
+    if config.stepped_walk:
+        return f"sigma {config.taper_sigma_early:g} to {config.stepped_walk_end}, then {config.taper_sigma_late:g}"
+    return (
+        f"sigma {config.taper_sigma_early:g} tapering to {config.taper_sigma_late:g} "
+        f"at {config.taper_end}, then flat"
+    )
+
+
 def _ustar_taper(
     model: pm.Model,
     config: ModelConfig,
@@ -103,6 +113,16 @@ def _ustar_taper(
     """
     if obs_index is None:
         raise ValueError("the tapered walk needs obs_index to date its taper")
+    if config.stepped_walk:
+        # No taper: the late step throughout, raised to the early step by a
+        # window from the second quarter, the first having its own prior.
+        second = str(obs_index[1])
+        return tapered_walk(
+            model, obs_index, name="ustar",
+            early=config.taper_sigma_late, late=config.taper_sigma_late, end=second,
+            init_mu=config.taper_start_mu, init_sd=config.taper_init_sd,
+            windows=((second, config.stepped_walk_end, config.taper_sigma_early),),
+        )
     return tapered_walk(
         model, obs_index, name="ustar",
         early=config.taper_sigma_early, late=config.taper_sigma_late, end=config.taper_end,
@@ -319,10 +339,7 @@ def build_model(
     elif config.ustar_structure == "decay":
         state = "u*_t = u*_{t-1} + phi x (u*_eq - u*_{t-1}) + e   (sigma imposed)"
     elif config.ustar_structure == "taper":
-        state = (
-            f"u*_t = u*_{{t-1}} + sigma_t x z_t   (sigma {config.taper_sigma_early:g} tapering to "
-            f"{config.taper_sigma_late:g} at {config.taper_end}, then flat)"
-        )
+        state = f"u*_t = u*_{{t-1}} + sigma_t x z_t   ({_step_schedule(config)})"
     elif config.ustar_drift:
         state = (
             f"u*_t = u*_{{t-1}} - lambda x max(0, pi_exp - {config.anchor:g}) + e   "
@@ -405,8 +422,8 @@ def run_estimate(
     on = [n for n, keep in (("Okun", config.include_okun), ("Phillips", config.include_phillips)) if keep]
     print(f"Equations:    {' + '.join(on)}")
     if config.ustar_structure == "taper":
-        print(f"Imposed:      sigma_ustar {config.taper_sigma_early:g} -> {config.taper_sigma_late:g} "
-              f"by {config.taper_end}, start prior N({config.taper_start_mu:g}, {config.taper_init_sd:g})")
+        print(f"Imposed:      u* step {_step_schedule(config)}, "
+              f"start prior N({config.taper_start_mu:g}, {config.taper_init_sd:g})")
     elif config.free_sigma_ustar:
         mu, sd, lower, upper = config.sigma_ustar_prior
         bound = f"lower={lower:g}, upper={upper:g}" if upper is not None else f"lower={lower:g}"
