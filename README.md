@@ -39,6 +39,7 @@ Four complementary approaches to nowcasting the next unpublished quarterly GDP g
 
 - **Bank funding and lending costs** (`bank_costs`): RBA bill, deposit and lending rates against the cash rate. Charts only, no model
 - **Participation after rate rises** (`participation_rate`): event study and local projections of the participation rate around RBA decisions. See [notes](src/models/participation_rate/MODEL_NOTES.md)
+- **Real TWI gap** (`twi_gap`): the real TWI against US$ commodity prices, shaded behind the cash rate — is the dollar adding to the policy rate or offsetting it? FX conditions, not the policy stance. See [notes](src/models/twi_gap/MODEL_NOTES.md)
 
 ## Retired, superseded or not working
 
@@ -63,8 +64,9 @@ uv sync
 ./run-ystar-ustar.sh
 ```
 
-Each `run-*.sh` says in its header which other models must be run first, and lists its options
-at the bottom.
+[RUNNING.md](RUNNING.md) has the run order, the shared options and the summary scripts' refresh
+rule. Each `run-*.sh` also says in its header which models must be run first, and lists its own
+options at the bottom.
 
 ABS and RBA data are fetched and cached automatically, no credentials needed. The only
 exception is `src/data/fred_loader.py`, used for the world real-rate comparators in the r\*
@@ -116,6 +118,7 @@ src/
     ├── is_curve/               # the IS curve plotted, not estimated: a test bench for the r* models
     ├── bank_costs/             # bank funding and lending costs vs the cash rate (exploratory, charts only)
     ├── participation_rate/     # participation after RBA rate moves (exploratory regressions)
+    ├── twi_gap/                # real TWI vs commodity prices (exploratory, charts only)
     ├── gdp_nowcast_bridge/     # GDP nowcast: bridge equations
     ├── gdp_nowcast_dfm/        # GDP nowcast: Dynamic Factor Model
     ├── gdp_nowcast_bvar/       # GDP nowcast: Bayesian VAR (T-0 only)

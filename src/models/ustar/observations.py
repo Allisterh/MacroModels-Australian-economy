@@ -165,7 +165,9 @@ def build_observations(
                 "No saved expectations model output found. The Phillips curve "
                 "reads the unanchored expectations series, so the expectations "
                 "model must be run first: ./run-expectations.sh. To estimate u* "
-                "without it, use --no-phillips (Okun only).",
+                "without it, use --okun --no-phillips, which swaps the Phillips "
+                "curve for the Okun equation; --no-phillips on its own would "
+                "leave no equation at all, since Okun is off by default.",
             ) from exc
         columns["d4pm"] = sources.take(
             get_import_price_growth_lagged_annual(), "Import price growth", key="d4pm",
